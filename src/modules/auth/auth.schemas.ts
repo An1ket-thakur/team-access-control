@@ -18,3 +18,10 @@ export const loginBody = z.object({
 });
 
 export const refreshBody = z.object({ refreshToken: z.string().min(10).max(300) });
+
+export const forgotBody = z.object({ email: emailSchema });
+
+export const resetBody = z.object({
+  token: z.string().min(10).max(200),
+  password: passwordSchema,
+});

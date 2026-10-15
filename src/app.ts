@@ -5,10 +5,12 @@ import { config } from "./config";
 import { db, pool } from "./db";
 import { redis } from "./redis";
 import { requestId } from "./middleware/requestId";
-import { sessionsRouter } from './modules/sessions/sessions.routes';
+import { sessionsRouter } from "./modules/sessions/sessions.routes";
 import { rateLimit } from "./middleware/rateLimit";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authRouter } from "./modules/auth/auth.routes";
+import { usersRouter } from "./modules/users/users.routes";
+import { orgsRouter } from "./modules/orgs/orgs.routes";
 
 export function createApp() {
   const app = express();
@@ -45,7 +47,9 @@ export function createApp() {
   );
 
   app.use("/auth", authRouter);
-  app.use('/me/sessions', sessionsRouter);
+  app.use("/me/sessions", sessionsRouter);
+  app.use("/me", usersRouter);
+  app.use("/orgs", orgsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
