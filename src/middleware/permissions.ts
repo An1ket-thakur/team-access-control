@@ -2,14 +2,16 @@ import type { RequestHandler } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { memberships, organizations, roles } from "../schema";
+import { memberships, organizations, permissions, rolePermissions, roles } from "../schema";
 import { Errors } from "../lib/errors";
+import type { PermissionKey } from "../lib/permissions";
 import { userPrincipal } from "./auth";
 
 const uuid = z.string().uuid();
 
 /**
- * Resolves the caller's standing inside the organization named by `:orgId`.
+ * Resolves the caller's standing inside the organization named by `:orgId`:
+ * their role AND the permissions that role grants.
  * The caller must be a member of a live organization. Non-members get a 404 (not 403),
  * so organization ids cannot be probed.
  */
@@ -29,12 +31,34 @@ export const orgContext: RequestHandler = async (req, _res, next) => {
       .limit(1);
     if (!membership) throw Errors.notFound("Organization");
 
+    const rows = await db
+      .select({ key: permissions.key })
+      .from(rolePermissions)
+      .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
+      .where(eq(rolePermissions.roleId, membership.roleId));
+
     req.org = {
       orgId,
       role: { id: membership.roleId, name: membership.roleName, rank: membership.rank },
+      permissions: new Set(rows.map((r) => r.key)),
     };
     next();
   } catch (err) {
     next(err);
   }
 };
+
+/** Route-level guard. All listed permissions are required. Deny by default. */
+export function requirePermission(...required: PermissionKey[]): RequestHandler {
+  return (req, _res, next) => {
+    const ctx = req.org;
+    if (!ctx) return next(Errors.forbidden()); // guard used without orgContext: deny
+    const missing = required.filter((p) => !ctx.permissions.has(p));
+    if (missing.length > 0) {
+      return next(Errors.forbidden("You do not have permission to perform this action", { required: missing }));
+    }
+    next();
+  };
+}
+
+export const hasPermission = (req: Express.Request, key: PermissionKey) => req.org?.permissions.has(key) ?? false;

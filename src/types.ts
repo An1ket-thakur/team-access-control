@@ -4,6 +4,7 @@ export type Principal = { type: "user"; userId: string; sessionId: string };
 export interface OrgContext {
   orgId: string;
   role: { id: string; name: string; rank: number };
+  permissions: Set<string>;
 }
 
 declare global {

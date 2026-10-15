@@ -1,14 +1,17 @@
 import { Router } from "express";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { memberships, organizations, roles } from "../../schema";
+import { Errors } from "../../lib/errors";
+import { PERMISSIONS } from "../../lib/permissions";
 import { authenticate, userPrincipal } from "../../middleware/auth";
-import { orgContext } from "../../middleware/permissions";
+import { orgContext, requirePermission } from "../../middleware/permissions";
 import { createOrganization } from "./orgs.service";
+import { rolesRouter } from "../roles/roles.routes";
 
 /** Mounted at /orgs. */
-export const orgsRouter = Router();
+const orgsRouter = Router();
 orgsRouter.use(authenticate);
 
 const createBody = z.object({ name: z.string().trim().min(2).max(80) });
@@ -64,3 +67,36 @@ orgsRouter.get("/:orgId", async (req, res) => {
 
   res.json({ organization: org, me: { role: ctx.role.name } });
 });
+
+// DELETE /orgs/:orgId   (soft delete; owner only via org.manage)
+orgsRouter.delete("/:orgId", requirePermission("org.manage"), async (req, res) => {
+  const orgId = req.org!.orgId;
+  const { confirmName } = z.object({ confirmName: z.string() }).parse(req.body);
+  const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
+  if (!org) throw Errors.notFound("Organization");
+  if (confirmName !== org.name) {
+    throw Errors.validation([{ path: "confirmName", message: "Must exactly match the organization name" }]);
+  }
+
+  await db.update(organizations).set({ deletedAt: new Date() }).where(eq(organizations.id, orgId));
+  res.status(204).end();
+});
+
+// GET /orgs/:orgId/permissions   (the permission catalog)
+orgsRouter.get("/:orgId/permissions", requirePermission("users.read"), (_req, res) => {
+  res.json({ data: PERMISSIONS });
+});
+
+// GET /orgs/:orgId/billing   (demo endpoint guarded by billing.read)
+orgsRouter.get("/:orgId/billing", requirePermission("billing.read"), async (req, res) => {
+  const [{ seats }] = await db
+    .select({ seats: count() })
+    .from(memberships)
+    .where(eq(memberships.orgId, req.org!.orgId));
+
+  res.json({ plan: "free", seats, currency: "USD", nextInvoice: null });
+});
+
+orgsRouter.use("/:orgId/roles", rolesRouter);
+
+export { orgsRouter };
