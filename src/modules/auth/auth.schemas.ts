@@ -16,3 +16,5 @@ export const loginBody = z.object({
   // Do not enforce the password policy at login: only verify.
   password: z.string().min(1).max(128),
 });
+
+export const refreshBody = z.object({ refreshToken: z.string().min(10).max(300) });

@@ -5,7 +5,7 @@ import { config } from "./config";
 import { db, pool } from "./db";
 import { redis } from "./redis";
 import { requestId } from "./middleware/requestId";
-import { authenticate } from "./middleware/auth";
+import { sessionsRouter } from './modules/sessions/sessions.routes';
 import { rateLimit } from "./middleware/rateLimit";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authRouter } from "./modules/auth/auth.routes";
@@ -45,6 +45,7 @@ export function createApp() {
   );
 
   app.use("/auth", authRouter);
+  app.use('/me/sessions', sessionsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

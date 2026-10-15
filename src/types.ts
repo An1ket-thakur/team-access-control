@@ -1,4 +1,4 @@
-export type Principal = { type: "user"; userId: string };
+export type Principal = { type: 'user'; userId: string; sessionId: string };
 
 declare global {
   namespace Express {
