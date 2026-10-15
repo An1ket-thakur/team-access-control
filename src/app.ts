@@ -11,6 +11,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authRouter } from "./modules/auth/auth.routes";
 import { usersRouter } from "./modules/users/users.routes";
 import { orgsRouter } from "./modules/orgs/orgs.routes";
+import { inviteAcceptRouter } from "./modules/invitations/invitations.routes";
 
 export function createApp() {
   const app = express();
@@ -50,6 +51,7 @@ export function createApp() {
   app.use("/me/sessions", sessionsRouter);
   app.use("/me", usersRouter);
   app.use("/orgs", orgsRouter);
+  app.use("/invitations", inviteAcceptRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

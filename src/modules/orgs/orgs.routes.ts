@@ -9,6 +9,8 @@ import { authenticate, userPrincipal } from "../../middleware/auth";
 import { orgContext, requirePermission } from "../../middleware/permissions";
 import { createOrganization } from "./orgs.service";
 import { rolesRouter } from "../roles/roles.routes";
+import { membersRouter } from "../members/members.routes";
+import { invitationsRouter } from "../invitations/invitations.routes";
 
 /** Mounted at /orgs. */
 const orgsRouter = Router();
@@ -97,6 +99,8 @@ orgsRouter.get("/:orgId/billing", requirePermission("billing.read"), async (req,
   res.json({ plan: "free", seats, currency: "USD", nextInvoice: null });
 });
 
+orgsRouter.use("/:orgId/members", membersRouter);
 orgsRouter.use("/:orgId/roles", rolesRouter);
+orgsRouter.use("/:orgId/invitations", invitationsRouter);
 
 export { orgsRouter };

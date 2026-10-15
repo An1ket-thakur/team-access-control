@@ -58,3 +58,12 @@ export async function findOrgRole(orgId: string, name: string, handle: typeof db
     .limit(1);
   return role;
 }
+
+/**
+ * Who may hand out (or take away) a role? Owners may assign anything; everyone else can only
+ * act on roles strictly below their own, which blocks privilege escalation by admins.
+ */
+export function canAssignRank(actor: { name: string; rank: number }, targetRank: number): boolean {
+  if (actor.name === "owner") return true;
+  return targetRank < actor.rank;
+}

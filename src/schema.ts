@@ -73,3 +73,17 @@ export const rolePermissions = pgTable(
   },
   (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })],
 );
+
+export const invitations = pgTable("invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  email: text("email").notNull(),
+  roleId: uuid("role_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  invitedBy: uuid("invited_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  acceptedBy: uuid("accepted_by"),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
