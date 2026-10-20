@@ -1,5 +1,5 @@
 import { config as loadEnv } from "dotenv";
-loadEnv();
+loadEnv({ quiet: true });
 import { z } from "zod";
 
 const bool = z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1");

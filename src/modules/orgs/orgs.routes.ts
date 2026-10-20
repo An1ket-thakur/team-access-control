@@ -5,12 +5,16 @@ import { db } from "../../db";
 import { memberships, organizations, roles } from "../../schema";
 import { Errors } from "../../lib/errors";
 import { PERMISSIONS } from "../../lib/permissions";
-import { authenticate, userPrincipal } from "../../middleware/auth";
+import { authenticate, requireUser, userPrincipal } from "../../middleware/auth";
 import { orgContext, requirePermission } from "../../middleware/permissions";
 import { createOrganization } from "./orgs.service";
 import { rolesRouter } from "../roles/roles.routes";
 import { membersRouter } from "../members/members.routes";
 import { invitationsRouter } from "../invitations/invitations.routes";
+import { apiKeysRouter } from "../apikeys/apikeys.routes";
+import { projectsRouter } from "../projects/projects.routes";
+import { audit } from "../../lib/audit";
+import { auditRouter } from "../audit/audit.routes";
 
 /** Mounted at /orgs. */
 const orgsRouter = Router();
@@ -22,7 +26,7 @@ const createBody = z.object({ name: z.string().trim().min(2).max(80) });
 orgsRouter.post("/", async (req, res) => {
   const { userId } = userPrincipal(req);
   const { name } = createBody.parse(req.body);
-  const org = await db.transaction((tx) => createOrganization(tx, userId, name));
+  const org = await db.transaction((tx) => createOrganization(req, tx, userId, name));
 
   res.status(201).json({
     organization: { id: org.id, name: org.name, slug: org.slug, createdAt: org.createdAt },
@@ -67,7 +71,7 @@ orgsRouter.get("/:orgId", async (req, res) => {
     .where(eq(organizations.id, ctx.orgId))
     .limit(1);
 
-  res.json({ organization: org, me: { role: ctx.role.name } });
+  res.json({ organization: org, me: { role: ctx.role!.name } });
 });
 
 // DELETE /orgs/:orgId   (soft delete; owner only via org.manage)
@@ -80,12 +84,15 @@ orgsRouter.delete("/:orgId", requirePermission("org.manage"), async (req, res) =
     throw Errors.validation([{ path: "confirmName", message: "Must exactly match the organization name" }]);
   }
 
-  await db.update(organizations).set({ deletedAt: new Date() }).where(eq(organizations.id, orgId));
+  await db.transaction(async (tx) => {
+    await tx.update(organizations).set({ deletedAt: new Date() }).where(eq(organizations.id, orgId));
+    await audit(req, { action: "org.deleted", orgId, targetType: "organization", targetId: orgId }, tx);
+  });
   res.status(204).end();
 });
 
 // GET /orgs/:orgId/permissions   (the permission catalog)
-orgsRouter.get("/:orgId/permissions", requirePermission("users.read"), (_req, res) => {
+orgsRouter.get("/:orgId/permissions", requirePermission("users.read", "org.manage"), (_req, res) => {
   res.json({ data: PERMISSIONS });
 });
 
@@ -99,8 +106,12 @@ orgsRouter.get("/:orgId/billing", requirePermission("billing.read"), async (req,
   res.json({ plan: "free", seats, currency: "USD", nextInvoice: null });
 });
 
-orgsRouter.use("/:orgId/members", membersRouter);
-orgsRouter.use("/:orgId/roles", rolesRouter);
-orgsRouter.use("/:orgId/invitations", invitationsRouter);
+orgsRouter.use("/:orgId/members", requireUser, membersRouter);
+orgsRouter.use("/:orgId/roles", requireUser, rolesRouter);
+orgsRouter.use("/:orgId/invitations", requireUser, invitationsRouter);
+
+orgsRouter.use("/:orgId/projects", projectsRouter);
+orgsRouter.use("/:orgId/api-keys", apiKeysRouter);
+orgsRouter.use('/:orgId/audit-logs', auditRouter);
 
 export { orgsRouter };

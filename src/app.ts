@@ -1,4 +1,5 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
 import helmet from "helmet";
 import { sql } from "drizzle-orm";
 import { config } from "./config";
@@ -12,6 +13,7 @@ import { authRouter } from "./modules/auth/auth.routes";
 import { usersRouter } from "./modules/users/users.routes";
 import { orgsRouter } from "./modules/orgs/orgs.routes";
 import { inviteAcceptRouter } from "./modules/invitations/invitations.routes";
+import { buildOpenApiDocument } from "./openapi";
 
 export function createApp() {
   const app = express();
@@ -38,6 +40,11 @@ export function createApp() {
     const healthy = Object.values(checks).every((v) => v === "ok");
     res.status(healthy ? 200 : 503).json({ status: healthy ? "ok" : "degraded", checks });
   });
+
+  // API documentation (public, outside the rate limiter like /health)
+  const openApi = buildOpenApiDocument();
+  app.get("/openapi.json", (_req, res) => res.json(openApi));
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApi, { customSiteTitle: "Team Access Control API" }));
 
   app.use(
     rateLimit({

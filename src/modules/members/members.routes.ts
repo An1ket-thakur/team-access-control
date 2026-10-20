@@ -9,6 +9,7 @@ import { ROLE_NAMES } from "../../lib/permissions";
 import { userPrincipal } from "../../middleware/auth";
 import { requirePermission } from "../../middleware/permissions";
 import { canAssignRank, findOrgRole } from "../orgs/orgs.service";
+import { audit } from "../../lib/audit";
 
 /** Mounted at /orgs/:orgId/members. */
 export const membersRouter = Router({ mergeParams: true });
@@ -94,7 +95,10 @@ membersRouter.delete("/me", async (req, res) => {
   if (me.roleName === "owner" && (await activeOwnerCount(orgId)) <= 1) {
     throw Errors.conflict("You are the last owner. Promote another owner or delete the organization.");
   }
-  await db.delete(memberships).where(eq(memberships.id, me.membershipId));
+  await db.transaction(async (tx) => {
+    await tx.delete(memberships).where(eq(memberships.id, me.membershipId));
+    await audit(req, { action: "member.left", orgId, targetType: "user", targetId: userId }, tx);
+  });
   res.status(204).end();
 });
 
@@ -102,7 +106,7 @@ membersRouter.delete("/me", async (req, res) => {
 membersRouter.patch("/:userId", requirePermission("users.manage"), async (req, res) => {
   const actor = userPrincipal(req);
   const orgId = req.org!.orgId;
-  const actorRole = req.org!.role;
+  const actorRole = req.org!.role!;
   const targetUserId = z.string().uuid().safeParse(req.params.userId);
   if (!targetUserId.success) throw Errors.notFound("Member");
   const { role: newRoleName } = z.object({ role: roleEnum }).parse(req.body);
@@ -124,7 +128,20 @@ membersRouter.patch("/:userId", requirePermission("users.manage"), async (req, r
     return res.json({ userId: targetUserId.data, role: newRoleName });
   }
 
-  await db.update(memberships).set({ roleId: newRole.id }).where(eq(memberships.id, target.membershipId));
+  await db.transaction(async (tx) => {
+    await tx.update(memberships).set({ roleId: newRole.id }).where(eq(memberships.id, target.membershipId));
+    await audit(
+      req,
+      {
+        action: "member.role_changed",
+        orgId,
+        targetType: "user",
+        targetId: targetUserId.data,
+        metadata: { from: target.roleName, to: newRoleName },
+      },
+      tx,
+    );
+  });
   res.json({ userId: targetUserId.data, role: newRoleName });
 });
 
@@ -140,10 +157,23 @@ membersRouter.delete("/:userId", requirePermission("users.manage"), async (req, 
 
   const target = await loadTarget(orgId, targetUserId.data);
   if (!target) throw Errors.notFound("Member");
-  if (!canAssignRank(req.org!.role, target.rank)) {
+  if (!canAssignRank(req.org!.role!, target.rank)) {
     throw Errors.forbidden("You cannot remove a member at or above your own role");
   }
 
-  await db.delete(memberships).where(eq(memberships.id, target.membershipId));
+  await db.transaction(async (tx) => {
+    await tx.delete(memberships).where(eq(memberships.id, target.membershipId));
+    await audit(
+      req,
+      {
+        action: "member.removed",
+        orgId,
+        targetType: "user",
+        targetId: targetUserId.data,
+        metadata: { role: target.roleName },
+      },
+      tx,
+    );
+  });
   res.status(204).end();
 });

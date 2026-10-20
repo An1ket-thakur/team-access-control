@@ -6,6 +6,7 @@ import { sessions } from "../../schema";
 import { Errors } from "../../lib/errors";
 import { authenticate, userPrincipal } from "../../middleware/auth";
 import { revokeAllUserSessions, revokeSession } from "./sessions.service";
+import { audit } from "../../lib/audit";
 
 /** Mounted at /me/sessions. Everything here acts only on the caller's own sessions. */
 export const sessionsRouter = Router();
@@ -34,6 +35,14 @@ sessionsRouter.get("/", async (req, res) => {
 sessionsRouter.post("/revoke-others", async (req, res) => {
   const { userId, sessionId } = userPrincipal(req);
   const revoked = await revokeAllUserSessions(userId, "revoked_by_user", sessionId);
+  if (revoked > 0) {
+    await audit(req, {
+      action: "session.revoked",
+      targetType: "user",
+      targetId: userId,
+      metadata: { scope: "all_other_sessions", count: revoked },
+    });
+  }
   res.json({ revoked });
 });
 
@@ -52,5 +61,6 @@ sessionsRouter.delete("/:sessionId", async (req, res) => {
   if (!owned) throw Errors.notFound("Session");
 
   await revokeSession(owned.id, "revoked_by_user");
+  await audit(req, { action: "session.revoked", targetType: "session", targetId: owned.id });
   res.status(204).end();
 });

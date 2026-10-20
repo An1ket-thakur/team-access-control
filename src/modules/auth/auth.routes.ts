@@ -6,6 +6,7 @@ import { passwordResetTokens, sessions, users } from "../../schema";
 import { randomToken, safeEqual, sha256 } from "../../lib/crypto";
 import { Errors } from "../../lib/errors";
 import { isUniqueViolation } from "../../lib/pgErrors";
+import { audit } from "../../lib/audit";
 import { burnPasswordCheck, hashPassword, verifyPassword } from "../../lib/password";
 import { logger } from "../../logger";
 import { authenticate, userPrincipal } from "../../middleware/auth";
@@ -66,6 +67,7 @@ authRouter.post("/signup", ipLimiter, async (req, res) => {
   }
 
   const tokens = await createSession(user.id, { userAgent: req.get("user-agent"), ip: req.ip });
+  await audit(req, { action: "auth.signup", actorUserId: user.id, targetType: "user", targetId: user.id });
   res.status(201).json({ user: publicUser(user), ...tokenResponse(tokens) });
 });
 
@@ -85,10 +87,12 @@ authRouter.post("/login", ipLimiter, emailLimiter, async (req, res) => {
     throw Errors.invalidCredentials();
   }
   if (!(await verifyPassword(user.passwordHash, body.password))) {
+    await audit(req, { action: "auth.login_failed", actorUserId: user.id, targetType: "user", targetId: user.id });
     throw Errors.invalidCredentials();
   }
 
   const tokens = await createSession(user.id, { userAgent: req.get("user-agent"), ip: req.ip });
+  await audit(req, { action: "auth.login", actorUserId: user.id, targetType: "session", targetId: tokens.sessionId });
   res.json({ user: publicUser(user), ...tokenResponse(tokens) });
 });
 
@@ -107,6 +111,12 @@ authRouter.post("/refresh", ipLimiter, async (req, res) => {
     // An older token from this session was replayed => it was probably stolen. Kill the session.
     if (session.previousRefreshTokenHash && safeEqual(session.previousRefreshTokenHash, presentedHash)) {
       await revokeSession(session.id, "refresh_token_reuse");
+      await audit(req, {
+        action: "session.reuse_detected",
+        actorUserId: session.userId,
+        targetType: "session",
+        targetId: session.id,
+      });
     }
     throw Errors.invalidToken();
   }
@@ -143,8 +153,9 @@ authRouter.post("/refresh", ipLimiter, async (req, res) => {
 
 // POST /auth/logout  (revokes the session this token belongs to)
 authRouter.post("/logout", authenticate, async (req, res) => {
-  const { sessionId } = userPrincipal(req);
+  const { userId, sessionId } = userPrincipal(req);
   await revokeSession(sessionId, "logout");
+  await audit(req, { action: "auth.logout", actorUserId: userId, targetType: "session", targetId: sessionId });
   res.status(204).end();
 });
 
@@ -174,6 +185,11 @@ authRouter.post("/password/forgot", ipLimiter, emailLimiter, async (req, res) =>
         tokenHash: sha256(token),
         expiresAt: new Date(Date.now() + config.PASSWORD_RESET_TTL_MINUTES * 60_000),
       });
+      await audit(
+        req,
+        { action: "auth.password_reset_requested", actorUserId: user.id, targetType: "user", targetId: user.id },
+        tx,
+      );
     });
 
     // Integration point: send `token` by email here. Never log the token itself.
@@ -210,6 +226,12 @@ authRouter.post("/password/reset", ipLimiter, async (req, res) => {
       .where(and(eq(users.id, consumed.userId), isNull(users.deletedAt)))
       .returning({ id: users.id });
     if (updated.length === 0) throw Errors.invalidToken("Reset token is invalid or expired");
+
+    await audit(
+      req,
+      { action: "auth.password_reset", actorUserId: consumed.userId, targetType: "user", targetId: consumed.userId },
+      tx,
+    );
 
     return consumed.userId;
   });

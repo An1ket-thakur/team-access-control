@@ -1,12 +1,14 @@
 import { Router } from "express";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
-import { memberships, organizations, roles, users } from "../../schema";
+import { auditLogs, memberships, organizations, roles, users } from "../../schema";
 import { Errors } from "../../lib/errors";
 import { verifyPassword } from "../../lib/password";
 import { authenticate, userPrincipal } from "../../middleware/auth";
 import { revokeAllUserSessions } from "../sessions/sessions.service";
+import { audit } from "../../lib/audit";
+import { offsetOf, pageMeta, paginationQuery } from "../../lib/pagination";
 
 /** Mounted at /me. */
 const usersRouter = Router();
@@ -66,9 +68,30 @@ usersRouter.delete("/", async (req, res) => {
   }
 
   // Soft delete: the row stays (for history), but the account can no longer sign in.
-  await db.update(users).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, userId));
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, userId));
+    await audit(req, { action: "user.deleted", targetType: "user", targetId: userId }, tx);
+  });
   await revokeAllUserSessions(userId, "account_deleted");
   res.status(204).end();
+});
+
+// GET /me/audit-logs
+usersRouter.get("/audit-logs", async (req, res) => {
+  const { userId } = userPrincipal(req);
+  const q = paginationQuery.extend({ action: z.string().max(60).optional() }).parse(req.query);
+  const where = and(eq(auditLogs.actorUserId, userId), q.action ? eq(auditLogs.action, q.action) : undefined);
+
+  const [{ total }] = await db.select({ total: count() }).from(auditLogs).where(where);
+  const data = await db
+    .select()
+    .from(auditLogs)
+    .where(where)
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+    .limit(q.limit)
+    .offset(offsetOf(q));
+
+  res.json({ data, meta: pageMeta(q, total) });
 });
 
 export { usersRouter };

@@ -7,6 +7,7 @@ import { Errors } from "../../lib/errors";
 import { ALL_PERMISSION_KEYS, ROLE_NAMES } from "../../lib/permissions";
 import { requirePermission } from "../../middleware/permissions";
 import { findOrgRole } from "../orgs/orgs.service";
+import { audit } from "../../lib/audit";
 
 /** Mounted at /orgs/:orgId/roles. */
 const rolesRouter = Router({ mergeParams: true });
@@ -48,7 +49,7 @@ rolesRouter.put("/:roleName/permissions", requirePermission("roles.manage"), asy
   // The owner role is fixed so an organization can never lock itself out.
   if (role.name === "owner") throw Errors.forbidden("The owner role cannot be modified");
   // You can only edit roles that rank below yours.
-  if (role.rank >= actorRole.rank) throw Errors.forbidden("You cannot modify a role at or above your own");
+  if (role.rank >= actorRole!.rank) throw Errors.forbidden("You cannot modify a role at or above your own");
 
   const currentRows = await db
     .select({ key: permissions.key })
@@ -85,6 +86,32 @@ rolesRouter.put("/:roleName/permissions", requirePermission("roles.manage"), asy
               rows.map((p) => p.id),
             ),
           ),
+        );
+      }
+      for (const key of added) {
+        await audit(
+          req,
+          {
+            action: "permission.granted",
+            orgId,
+            targetType: "role",
+            targetId: role.id,
+            metadata: { role: role.name, permission: key },
+          },
+          tx,
+        );
+      }
+      for (const key of removed) {
+        await audit(
+          req,
+          {
+            action: "permission.revoked",
+            orgId,
+            targetType: "role",
+            targetId: role.id,
+            metadata: { role: role.name, permission: key },
+          },
+          tx,
         );
       }
     });

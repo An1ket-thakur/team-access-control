@@ -14,6 +14,7 @@ import { rateLimit } from "../../middleware/rateLimit";
 import { requirePermission } from "../../middleware/permissions";
 import { emailSchema } from "../auth/auth.schemas";
 import { canAssignRank, findOrgRole } from "../orgs/orgs.service";
+import { audit } from "../../lib/audit";
 
 /** Mounted at /orgs/:orgId/invitations (manage the invitations of one organization). */
 export const invitationsRouter = Router({ mergeParams: true });
@@ -37,7 +38,7 @@ invitationsRouter.post("/", requirePermission("users.invite"), async (req, res) 
 
   const role = await findOrgRole(orgId, body.role);
   if (!role) throw Errors.notFound("Role");
-  if (!canAssignRank(req.org!.role, role.rank)) {
+  if (!canAssignRank(req.org!.role!, role.rank)) {
     throw Errors.forbidden("You cannot invite someone to a role at or above your own");
   }
 
@@ -80,6 +81,17 @@ invitationsRouter.post("/", requirePermission("users.invite"), async (req, res) 
           expiresAt,
         })
         .returning();
+      await audit(
+        req,
+        {
+          action: "invitation.created",
+          orgId,
+          targetType: "invitation",
+          targetId: row.id,
+          metadata: { email: body.email, role: role.name },
+        },
+        tx,
+      );
       return row;
     });
   } catch (err) {
@@ -132,19 +144,35 @@ invitationsRouter.delete("/:invitationId", requirePermission("users.invite"), as
   const id = z.string().uuid().safeParse(req.params.invitationId);
   if (!id.success) throw Errors.notFound("Invitation");
 
-  const rows = await db
-    .update(invitations)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(invitations.id, id.data),
-        eq(invitations.orgId, orgId),
-        isNull(invitations.acceptedAt),
-        isNull(invitations.revokedAt),
-      ),
-    )
-    .returning({ id: invitations.id });
-  if (rows.length === 0) throw Errors.notFound("Pending invitation");
+  const revoked = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(invitations)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(invitations.id, id.data),
+          eq(invitations.orgId, orgId),
+          isNull(invitations.acceptedAt),
+          isNull(invitations.revokedAt),
+        ),
+      )
+      .returning({ id: invitations.id, email: invitations.email });
+    if (rows.length > 0) {
+      await audit(
+        req,
+        {
+          action: "invitation.revoked",
+          orgId,
+          targetType: "invitation",
+          targetId: id.data,
+          metadata: { email: rows[0].email },
+        },
+        tx,
+      );
+    }
+    return rows.length > 0;
+  });
+  if (!revoked) throw Errors.notFound("Pending invitation");
   res.status(204).end();
 });
 
@@ -234,6 +262,17 @@ inviteAcceptRouter.post("/accept", acceptLimiter, authenticate, async (req, res)
 
     await tx.insert(memberships).values({ userId, orgId: inv.orgId, roleId: inv.roleId });
     await tx.update(invitations).set({ acceptedAt: new Date(), acceptedBy: userId }).where(eq(invitations.id, inv.id));
+    await audit(
+      req,
+      {
+        action: "invitation.accepted",
+        orgId: inv.orgId,
+        targetType: "invitation",
+        targetId: inv.id,
+        metadata: { role: row.roleName },
+      },
+      tx,
+    );
     return { orgId: inv.orgId, orgName: row.orgName, role: row.roleName };
   });
 

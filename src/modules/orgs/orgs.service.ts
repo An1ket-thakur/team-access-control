@@ -2,6 +2,8 @@ import { randomInt } from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { db, type Tx } from "../../db";
 import { memberships, organizations, roles } from "../../schema";
+import { audit } from "../../lib/audit";
+import type { Request } from "express";
 
 const slugify = (name: string) =>
   name
@@ -18,7 +20,7 @@ const randomSuffix = () => Array.from({ length: 6 }, () => randomInt(0, 36).toSt
  * and makes `ownerUserId` the owner. Runs inside the caller's transaction, so it either
  * fully happens or not at all.
  */
-export async function createOrganization(tx: Tx, ownerUserId: string, name: string) {
+export async function createOrganization(req: Request, tx: Tx, ownerUserId: string, name: string) {
   const [org] = await tx
     .insert(organizations)
     .values({ name, slug: `${slugify(name)}-${randomSuffix()}`, createdBy: ownerUserId })
@@ -47,6 +49,11 @@ export async function createOrganization(tx: Tx, ownerUserId: string, name: stri
   if (!ownerRole) throw new Error("System roles are not seeded. Run `npm run db:seed`.");
 
   await tx.insert(memberships).values({ userId: ownerUserId, orgId: org.id, roleId: ownerRole.id });
+  await audit(
+    req,
+    { action: "org.created", orgId: org.id, actorUserId: ownerUserId, targetType: "organization", targetId: org.id },
+    tx,
+  );
   return org;
 }
 

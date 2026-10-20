@@ -1,9 +1,11 @@
-export type Principal = { type: "user"; userId: string; sessionId: string };
+export type Principal =
+  | { type: "user"; userId: string; sessionId: string }
+  | { type: "apikey"; apiKeyId: string; orgId: string; permissions: string[] };
 
-// The caller's standing inside the organization named by :orgId. A later step adds permissions.
 export interface OrgContext {
   orgId: string;
-  role: { id: string; name: string; rank: number };
+  /** null when the caller is an API key (keys carry permissions directly, not a role). */
+  role: { id: string; name: string; rank: number } | null;
   permissions: Set<string>;
 }
 
