@@ -24,9 +24,6 @@ Built with Node.js, TypeScript, Express 5, PostgreSQL (Drizzle ORM), Redis, Zod,
 - Redis rate limiting on auth routes
 - Swagger / OpenAPI at `/docs`
 - Integration tests for auth and permission failure cases
-
-**Extras**
-
 - Password reset flow
 - API keys for machine-to-machine access
 - Soft delete for users, organizations and projects
@@ -161,7 +158,7 @@ tests/                   Jest + Supertest integration tests
 | `004_organizations.sql`     | `organizations`, `roles`, `memberships` |
 | `005_permissions.sql`       | `permissions`, `role_permissions`       |
 | `006_invitations.sql`       | `invitations`                           |
-| `007_projects_api_keys.sql` | `projects`, `api_keys`                  |
+| `007_projects_apikeys.sql` | `projects`, `api_keys`                  |
 | `008_audit_logs.sql`        | `audit_logs`                            |
 
 ### Data model

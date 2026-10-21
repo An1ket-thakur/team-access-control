@@ -71,11 +71,11 @@ orgsRouter.get("/:orgId", async (req, res) => {
     .where(eq(organizations.id, ctx.orgId))
     .limit(1);
 
-  res.json({ organization: org, me: { role: ctx.role!.name } });
+  res.json({ organization: org, me: { role: ctx.role!.name ?? null } });
 });
 
 // DELETE /orgs/:orgId   (soft delete; owner only via org.manage)
-orgsRouter.delete("/:orgId", requirePermission("org.manage"), async (req, res) => {
+orgsRouter.delete("/:orgId", requireUser, requirePermission("org.manage"), async (req, res) => {
   const orgId = req.org!.orgId;
   const { confirmName } = z.object({ confirmName: z.string() }).parse(req.body);
   const [org] = await db.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
@@ -112,6 +112,6 @@ orgsRouter.use("/:orgId/invitations", requireUser, invitationsRouter);
 
 orgsRouter.use("/:orgId/projects", projectsRouter);
 orgsRouter.use("/:orgId/api-keys", apiKeysRouter);
-orgsRouter.use('/:orgId/audit-logs', auditRouter);
+orgsRouter.use("/:orgId/audit-logs", auditRouter);
 
 export { orgsRouter };
